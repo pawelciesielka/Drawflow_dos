@@ -569,6 +569,15 @@ export default class Drawflow {
         this.removeConnection();
       }
     }
+    if ((e.key === 'f' || e.key === 'F') && this.connection_selected != null) {
+      if(this.first_click && (this.first_click.tagName === 'INPUT' || this.first_click.tagName === 'TEXTAREA' || this.first_click.hasAttribute('contenteditable') === true)) return;
+      var cls = this.connection_selected.parentElement.classList;
+      var id_input = cls[1].replace('node_in_node-', '');
+      var id_output = cls[2].replace('node_out_node-', '');
+      var output_class = cls[3];
+      var input_class = cls[4];
+      this.flipConnectionBypassSide(id_output, id_input, output_class, input_class);
+    }
   }
 
   zoom_enter(event, delta) {
@@ -658,9 +667,9 @@ export default class Drawflow {
 
   }
 
-  createOrthogonalPath(start_pos_x, start_pos_y, end_pos_x, end_pos_y, corner_radius, type, source_bbox, target_bbox) {
-    const stub = 30;
-    const bypass_margin = 40;
+  createOrthogonalPath(start_pos_x, start_pos_y, end_pos_x, end_pos_y, corner_radius, type, source_bbox, target_bbox, bypass_side) {
+    const stub = 16;
+    const bypass_margin = 12;
     const has_start_stub = (type === 'openclose' || type === 'open');
     const has_end_stub = (type === 'openclose' || type === 'close');
     const start_anchor_x = has_start_stub ? start_pos_x + stub : start_pos_x;
@@ -677,14 +686,20 @@ export default class Drawflow {
       if (has_end_stub) pts.push([end_anchor_x, end_pos_y]);
       pts.push([end_pos_x, end_pos_y]);
     } else {
-      // Bypass measured from endpoint node bbox edges (per ADR 0002) rather
-      // than from port y — otherwise the bypass falls inside a tall node or
-      // between sibling output ports of a multi-port node.
+      // Bypass extents measured from endpoint node bbox edges (per ADR 0002)
+      // rather than from port y — otherwise it falls inside a tall node or
+      // between sibling output ports of a multi-port node. Side (top vs
+      // bottom) is overridable per connection via conn.bypass_side; absent
+      // → automatic by sign(source.y − target.y).
       const top_s = source_bbox ? source_bbox.y : start_pos_y;
       const bot_s = source_bbox ? source_bbox.y + source_bbox.h : start_pos_y;
       const top_t = target_bbox ? target_bbox.y : end_pos_y;
       const bot_t = target_bbox ? target_bbox.y + target_bbox.h : end_pos_y;
-      const bypass_y = (end_pos_y < start_pos_y)
+      let goes_top;
+      if (bypass_side === 'top') goes_top = true;
+      else if (bypass_side === 'bottom') goes_top = false;
+      else goes_top = (end_pos_y < start_pos_y);
+      const bypass_y = goes_top
         ? Math.min(top_s, top_t) - bypass_margin
         : Math.max(bot_s, bot_t) + bypass_margin;
       pts = [[start_pos_x, start_pos_y]];
@@ -873,7 +888,8 @@ export default class Drawflow {
     };
     const segPath = function(sx, sy, ex, ey, curv, segType, conn, src_bbox, tgt_bbox) {
       if (resolveStyle(conn) === 'orthogonal') {
-        return createOrthogonalPath(sx, sy, ex, ey, corner_radius, segType, src_bbox, tgt_bbox);
+        const side = conn && conn.bypass_side;
+        return createOrthogonalPath(sx, sy, ex, ey, corner_radius, segType, src_bbox, tgt_bbox, side);
       }
       return createCurvature(sx, sy, ex, ey, curv, segType);
     };
@@ -1957,6 +1973,55 @@ export default class Drawflow {
     Object.keys(data).forEach(function(nodeId) {
       self.updateConnectionNodes('node-' + nodeId);
     });
+  }
+
+  setConnectionBypassSide(id_output, id_input, output_class, input_class, side) {
+    var nodeOneModule = this.getModuleFromNodeId(id_output);
+    var nodeTwoModule = this.getModuleFromNodeId(id_input);
+    if(nodeOneModule !== nodeTwoModule) return false;
+
+    var conns = this.drawflow.drawflow[nodeOneModule].data[id_output].outputs[output_class].connections;
+    var idx = conns.findIndex(function(item){ return item.node == id_input && item.output === input_class; });
+    if(idx === -1) return false;
+
+    if(side === 'top' || side === 'bottom') {
+      conns[idx].bypass_side = side;
+    } else {
+      delete conns[idx].bypass_side;
+    }
+
+    if(this.module === nodeOneModule) {
+      this.updateConnectionNodes('node-' + id_output);
+    }
+    this.dispatch('connectionBypassSideChanged', { output_id: id_output, input_id: id_input, output_class: output_class, input_class: input_class, side: conns[idx].bypass_side || 'auto' });
+    return true;
+  }
+
+  flipConnectionBypassSide(id_output, id_input, output_class, input_class) {
+    var nodeOneModule = this.getModuleFromNodeId(id_output);
+    var nodeTwoModule = this.getModuleFromNodeId(id_input);
+    if(nodeOneModule !== nodeTwoModule) return false;
+
+    var conns = this.drawflow.drawflow[nodeOneModule].data[id_output].outputs[output_class].connections;
+    var idx = conns.findIndex(function(item){ return item.node == id_input && item.output === input_class; });
+    if(idx === -1) return false;
+
+    var current = conns[idx].bypass_side;
+    if(current !== 'top' && current !== 'bottom') {
+      var outNodeEl = this.container.querySelector('#node-' + id_output);
+      var inNodeEl = this.container.querySelector('#node-' + id_input);
+      if(!outNodeEl || !inNodeEl) return false;
+      var outPortEl = outNodeEl.querySelector('.' + output_class);
+      var inPortEl = inNodeEl.querySelector('.' + input_class);
+      if(!outPortEl || !inPortEl) return false;
+      var precanvas = this.precanvas;
+      var hzoom = precanvas.clientHeight / (precanvas.clientHeight * this.zoom) || 0;
+      var out_y = outPortEl.offsetHeight/2 + (outPortEl.getBoundingClientRect().y - precanvas.getBoundingClientRect().y) * hzoom;
+      var in_y = inPortEl.offsetHeight/2 + (inPortEl.getBoundingClientRect().y - precanvas.getBoundingClientRect().y) * hzoom;
+      current = (in_y < out_y) ? 'top' : 'bottom';
+    }
+    var next_side = current === 'top' ? 'bottom' : 'top';
+    return this.setConnectionBypassSide(id_output, id_input, output_class, input_class, next_side);
   }
 
   removeConnectionNodeId(id) {

@@ -23,7 +23,7 @@ Once shipped, all three are hard to change:
 
 **Routing.** Step path with three segments in the forward case (target right of source): horizontal stub from output → vertical → horizontal stub to input. The vertical segment is placed at `source.x + max(stub, dx/2)` ("adaptive mid-X"): mid-X for normal distances, fixed-stub fallback when source and target are close enough that mid-X would land inside a node. Default `stub ≈ 30–40px`.
 
-For back edges (target.x ≤ source.x) the path expands to five segments: stub right from output, vertical, horizontal bypass running above or below both nodes, vertical, stub left into input. The bypass side is chosen by `sign(source.y − target.y)` — if the target is above the source, go over the top; if below, go under.
+For back edges (target.x ≤ source.x) the path expands to five segments: stub right from output, vertical, horizontal bypass running above or below both nodes, vertical, stub left into input. The bypass side defaults to `sign(source.y − target.y)` — if the target is above the source, go over the top; if below, go under. The user can override the side per-connection via the optional `bypass_side` field on the output-side data entry (`'top'` / `'bottom'`; absent → automatic). This addresses the failure mode where the auto-chosen side happens to be densely populated with other nodes and the line gets visually lost — the user flips the side rather than reaching for a heavyweight pathfinder.
 
 Self-loops (same node) fall back to Bézier in v1. No special-case orthogonal trace; reconsider when a real use case appears.
 

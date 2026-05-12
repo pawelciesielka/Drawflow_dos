@@ -41,8 +41,18 @@ Semantics are **identical across styles**: a waypoint is a *transit point*, not 
 The shape of an orthogonal connection segment. Three sub-cases:
 
 - **Forward edge** (target x > source x): H → V → H. Three segments. Vertical segment placed at `source.x + max(stub, dx/2)` ("adaptive mid-X").
-- **Back edge** (target x ≤ source x): H → V → H → V → H. Five segments. The horizontal "bypass" segment runs above or below both nodes, side chosen by `sign(source.y − target.y)` (target above → bypass on top).
+- **Back edge** (target x ≤ source x): H → V → H → V → H. Five segments. The horizontal "bypass" segment runs above or below both nodes. The side is chosen by the connection's **bypass side** (see below).
 - **Self-loop**: falls back to Bézier in v1.
+
+## Bypass side
+
+For an orthogonal back-edge connection, the side of the horizontal bypass segment (above or below both endpoint nodes). Stored as the optional `bypass_side` field on the output-side connection entry, with values:
+
+- **`'auto'`** (default; represented by absence of the field) — the renderer picks the side at draw time by `sign(source.y − target.y)`: target above the source → bypass on top, otherwise on bottom.
+- **`'top'`** — force the bypass above both nodes.
+- **`'bottom'`** — force the bypass below both nodes.
+
+`bypass_side` is meaningful only for orthogonal back edges. The field is ignored for forward edges, Bézier connections, and self-loops.
 
 ## Stub
 

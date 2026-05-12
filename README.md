@@ -146,6 +146,7 @@ build: {
 - `Right click` to show remove options (Mobile long press).
 - `Left click press` to move editor or node selected.
 - `Ctrl + Mouse Wheel` Zoom in/out (Mobile pinch).
+- `F` with a connection selected: flip the bypass side (top ↔ bottom) of an orthogonal back-edge connection. Ignored for forward edges, Bézier connections, and when focus is inside an input/textarea/contenteditable.
 
 ## Editor
 You can change the editor to **fixed** type to block. Only editor can be moved. You can put it before start.
@@ -216,6 +217,22 @@ Routing notes for `orthogonal`:
 - The router only avoids the source and target node bounding boxes. Unrelated nodes on the canvas are not avoided automatically — if a routed line passes through a third-party node, add a reroute point (double-click) and drag it to a free area.
 - Reroute points keep their existing meaning: a point is a *transit position* the line must pass through, not a corner. Between adjacent points (or port↔point) the renderer draws a full step path, which can produce two H–V–H segments per added point rather than a single elbow.
 - Self-loops (output and input on the same node) fall back to Bézier in v1.
+
+**Back-edge bypass side.** When the target port is to the left of the source port, the orthogonal router routes the line above or below both nodes (a 5-segment bypass). By default it picks the side automatically (`sign(out.y − in.y)`). If that side is crowded with other nodes and the line gets lost behind them, you can force the opposite side:
+
+```javascript
+// select the connection (click on it), then press F to flip top ↔ bottom
+
+// or set it programmatically
+editor.setConnectionBypassSide(15, 16, 'output_1', 'input_1', 'top');    // force above
+editor.setConnectionBypassSide(15, 16, 'output_1', 'input_1', 'bottom'); // force below
+editor.setConnectionBypassSide(15, 16, 'output_1', 'input_1', 'auto');   // back to automatic
+
+// toggle (computes the currently-rendered side and saves the opposite)
+editor.flipConnectionBypassSide(15, 16, 'output_1', 'input_1');
+```
+
+The `bypass_side` field has no effect on forward edges (target right of source), Bézier connections, or self-loops.
 
 ## Modules
 Separate your flows in different editors.
@@ -304,6 +321,8 @@ Mehtod | Description
 `removeSingleConnection(id_output, id_input, output_class, input_class)` | Remove connection. Ex: `15,16,'output_1','input_1'`
 `updateConnectionStyle(id_output, id_input, output_class, input_class, style)` | Set or clear a per-connection style override. `style` is `'bezier'`, `'orthogonal'`, or `null`/`undefined` to remove the override (the connection then follows `editor.connection_style`). Re-renders that connection. Ex: `15,16,'output_1','input_1','orthogonal'`
 `refreshConnections()` | Re-render every connection in the current module. Use after changing `connection_style` or `connection_corner_radius` at runtime
+`setConnectionBypassSide(id_output, id_input, output_class, input_class, side)` | Force the bypass side of an orthogonal back-edge connection. `side` is `'top'`, `'bottom'`, or `'auto'`/`null` to restore automatic side selection. No-op for forward edges and Bézier connections. Ex: `15,16,'output_1','input_1','top'`
+`flipConnectionBypassSide(id_output, id_input, output_class, input_class)` | Toggle the bypass side of an orthogonal back-edge connection. Computes the currently-rendered side (from data or from current port positions when `auto`) and saves the opposite. Bound to the `F` keyboard shortcut while a connection is selected
 `updateConnectionNodes(id)` | Update connections position from Node Ex id: `node-x`
 `removeConnectionNodeId(id)` | Remove node connections. Ex id: `node-x`
 `getModuleFromNodeId(id)` | Get name of module where is the id. Ex id: `5`
@@ -334,6 +353,7 @@ Event | Return | Description
   `connectionCreated` | { output_id, input_id, output_class, input_class } | `id`'s of nodes and output/input selected
   `connectionRemoved` | { output_id, input_id, output_class, input_class } | `id`'s of nodes and output/input selected
   `connectionStyleChanged` | { output_id, input_id, output_class, input_class, style } | `style` is `'bezier'`, `'orthogonal'`, or `null` when the per-connection override was cleared
+  `connectionBypassSideChanged` | { output_id, input_id, output_class, input_class, side } | `side` is `'top'`, `'bottom'`, or `'auto'`
   `connectionSelected` | { output_id, input_id, output_class, input_class } | `id`'s of nodes and output/input selected
   `connectionUnselected` | true | Unselect connection
   `addReroute` | id | `id` of Node output
@@ -367,7 +387,7 @@ var exportdata = editor.export();
 editor.import(exportdata);
 ```
 
-A connection entry on the output side may carry an optional `style` field (`'bezier'` or `'orthogonal'`), set via `updateConnectionStyle(...)`. When the field is absent, the connection is rendered using `editor.connection_style`. Reroute points, if any, are stored in the existing `points` array on the same entry and are honored regardless of the chosen style. Legacy JSON without `style` is fully backward-compatible — no migration is required.
+A connection entry on the output side may carry an optional `style` field (`'bezier'` or `'orthogonal'`), set via `updateConnectionStyle(...)`. When the field is absent, the connection is rendered using `editor.connection_style`. Reroute points, if any, are stored in the existing `points` array on the same entry and are honored regardless of the chosen style. Orthogonal back-edge connections may also carry an optional `bypass_side` field (`'top'` or `'bottom'`) set via `setConnectionBypassSide(...)` or `flipConnectionBypassSide(...)` — when absent, the router picks the side automatically. Legacy JSON without these fields is fully backward-compatible — no migration is required.
 
 ### Export example
 Example of exported data:
