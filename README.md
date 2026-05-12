@@ -24,6 +24,7 @@ Installing only a javascript library and with four lines of code.
 - [Mouse and  Keys](#mouse-and-keys)
 - [Editor](#editor)
   - [Options](#editor-options)
+  - [Connection style](#connection-style)
 - [Modules](#modules)
 - [Nodes](#nodes)
   - [Node example](#node-example)
@@ -44,6 +45,7 @@ Installing only a javascript library and with four lines of code.
 - Delete Nodes and Connections
 - Add/Delete inputs/outputs
 - Reroute connections
+- Connection styles: Bézier curve or orthogonal (step path) with rounded corners
 - Data sync on Nodes
 - Zoom in / out
 - Clear data module
@@ -169,6 +171,8 @@ Parameter | Type | Default | Description
 `reroute_curvature` | Number | 0.5 | Curvature reroute
 `reroute_width` | Number | 6 | Width of reroute
 `line_path` | Number | 5 | Width of line
+`connection_style` | Text | `bezier` | Default rendering style for connections. `bezier` for cubic Bézier curves (original look) or `orthogonal` for step paths (axis-aligned segments with rounded corners)
+`connection_corner_radius` | Number | 8 | Corner radius (px) for `orthogonal` connections. `0` for sharp corners. Effective radius is clamped to half the shorter adjacent segment so corners never overlap
 `force_first_input` | Boolean | false | Force the first input to drop the connection on top of the node
 `editor_mode` | Text | `edit` | `edit` for edit, `fixed` for nodes fixed but their input fields available, `view` for view only
 `zoom` | Number | 1 | Default zoom
@@ -185,6 +189,33 @@ Active reroute connections. Use before `start` or `import`.
 editor.reroute = true;
 ```
 Create point with double click on line connection. Double click on point for remove.
+
+### Connection style
+Connections are rendered either as cubic Bézier curves (default, original behavior) or as orthogonal step paths (axis-aligned horizontal/vertical segments with rounded corners). Set the global default before `start` / `import`, or change it at runtime and refresh:
+
+```javascript
+// global default applied to every connection without an explicit override
+editor.connection_style = 'orthogonal'; // 'bezier' | 'orthogonal'
+editor.connection_corner_radius = 8;    // rounded corner radius in px; 0 = sharp
+
+// apply the new global style to connections already on the canvas
+editor.refreshConnections();
+```
+
+Per-connection override (takes precedence over the global default):
+
+```javascript
+// switch one connection to orthogonal regardless of the global default
+editor.updateConnectionStyle(15, 16, 'output_1', 'input_1', 'orthogonal');
+
+// clear the override (pass null / undefined / unknown value) — connection falls back to the global default
+editor.updateConnectionStyle(15, 16, 'output_1', 'input_1', null);
+```
+
+Routing notes for `orthogonal`:
+- The router only avoids the source and target node bounding boxes. Unrelated nodes on the canvas are not avoided automatically — if a routed line passes through a third-party node, add a reroute point (double-click) and drag it to a free area.
+- Reroute points keep their existing meaning: a point is a *transit position* the line must pass through, not a corner. Between adjacent points (or port↔point) the renderer draws a full step path, which can produce two H–V–H segments per added point rather than a single elbow.
+- Self-loops (output and input on the same node) fall back to Bézier in v1.
 
 ## Modules
 Separate your flows in different editors.
@@ -271,6 +302,8 @@ Mehtod | Description
 `removeNodeOutput(id, output_class)` | Remove output to node. Ex id: `5`, `output_2`
 `addConnection(id_output, id_input, output_class, input_class)` | Add connection. Ex: `15,16,'output_1','input_1'`
 `removeSingleConnection(id_output, id_input, output_class, input_class)` | Remove connection. Ex: `15,16,'output_1','input_1'`
+`updateConnectionStyle(id_output, id_input, output_class, input_class, style)` | Set or clear a per-connection style override. `style` is `'bezier'`, `'orthogonal'`, or `null`/`undefined` to remove the override (the connection then follows `editor.connection_style`). Re-renders that connection. Ex: `15,16,'output_1','input_1','orthogonal'`
+`refreshConnections()` | Re-render every connection in the current module. Use after changing `connection_style` or `connection_corner_radius` at runtime
 `updateConnectionNodes(id)` | Update connections position from Node Ex id: `node-x`
 `removeConnectionNodeId(id)` | Remove node connections. Ex id: `node-x`
 `getModuleFromNodeId(id)` | Get name of module where is the id. Ex id: `5`
@@ -300,6 +333,7 @@ Event | Return | Description
   `connectionCancel` | true | Connection Cancel
   `connectionCreated` | { output_id, input_id, output_class, input_class } | `id`'s of nodes and output/input selected
   `connectionRemoved` | { output_id, input_id, output_class, input_class } | `id`'s of nodes and output/input selected
+  `connectionStyleChanged` | { output_id, input_id, output_class, input_class, style } | `style` is `'bezier'`, `'orthogonal'`, or `null` when the per-connection override was cleared
   `connectionSelected` | { output_id, input_id, output_class, input_class } | `id`'s of nodes and output/input selected
   `connectionUnselected` | true | Unselect connection
   `addReroute` | id | `id` of Node output
@@ -332,6 +366,9 @@ You can export and import your data.
 var exportdata = editor.export();
 editor.import(exportdata);
 ```
+
+A connection entry on the output side may carry an optional `style` field (`'bezier'` or `'orthogonal'`), set via `updateConnectionStyle(...)`. When the field is absent, the connection is rendered using `editor.connection_style`. Reroute points, if any, are stored in the existing `points` array on the same entry and are honored regardless of the chosen style. Legacy JSON without `style` is fully backward-compatible — no migration is required.
+
 ### Export example
 Example of exported data:
 ```json
