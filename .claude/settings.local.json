@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(node -e \"require\\('./src/drawflow.js'\\)\")",
-      "Bash(node *)"
+      "Bash(node *)",
+      "Bash(npm install *)",
+      "Bash(npm run *)"
     ]
   }
 }

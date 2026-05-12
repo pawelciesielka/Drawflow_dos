@@ -1,6 +1,6 @@
 const gulp = require('gulp');
 const concat = require('gulp-concat');
-const minifyCSS = require('gulp-minify-css');
+const minifyCSS = require('gulp-clean-css');
 const replace = require('gulp-replace');
 
 gulp.task('style', () => {
