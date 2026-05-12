@@ -27,6 +27,8 @@ export default class Drawflow {
     this.mouse_x = 0;
     this.mouse_y = 0;
     this.line_path = 5;
+    this.connection_style = 'bezier';
+    this.connection_corner_radius = 8;
     this.first_click = null;
     this.force_first_input = false;
     this.draggable_inputs = true;
@@ -656,6 +658,83 @@ export default class Drawflow {
 
   }
 
+  createOrthogonalPath(start_pos_x, start_pos_y, end_pos_x, end_pos_y, corner_radius, type) {
+    const stub = 30;
+    const bypass_margin = 40;
+    const has_start_stub = (type === 'openclose' || type === 'open');
+    const has_end_stub = (type === 'openclose' || type === 'close');
+    const start_anchor_x = has_start_stub ? start_pos_x + stub : start_pos_x;
+    const end_anchor_x = has_end_stub ? end_pos_x - stub : end_pos_x;
+
+    let pts;
+    if (end_anchor_x > start_anchor_x) {
+      const dx = end_pos_x - start_pos_x;
+      const mid_x = Math.max(start_anchor_x, Math.min(end_anchor_x, start_pos_x + dx / 2));
+      pts = [[start_pos_x, start_pos_y]];
+      if (has_start_stub) pts.push([start_anchor_x, start_pos_y]);
+      pts.push([mid_x, start_pos_y]);
+      pts.push([mid_x, end_pos_y]);
+      if (has_end_stub) pts.push([end_anchor_x, end_pos_y]);
+      pts.push([end_pos_x, end_pos_y]);
+    } else {
+      const bypass_y = (end_pos_y < start_pos_y)
+        ? Math.min(start_pos_y, end_pos_y) - bypass_margin
+        : Math.max(start_pos_y, end_pos_y) + bypass_margin;
+      pts = [[start_pos_x, start_pos_y]];
+      if (has_start_stub) pts.push([start_anchor_x, start_pos_y]);
+      pts.push([start_anchor_x, bypass_y]);
+      pts.push([end_anchor_x, bypass_y]);
+      pts.push([end_anchor_x, end_pos_y]);
+      if (has_end_stub) pts.push([end_pos_x, end_pos_y]);
+    }
+
+    const cleaned = [];
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      const last = cleaned[cleaned.length - 1];
+      if (last && last[0] === p[0] && last[1] === p[1]) continue;
+      cleaned.push(p);
+    }
+    let removed = true;
+    while (removed && cleaned.length >= 3) {
+      removed = false;
+      for (let i = 1; i < cleaned.length - 1; i++) {
+        const a = cleaned[i - 1], b = cleaned[i], c = cleaned[i + 1];
+        if ((a[1] === b[1] && b[1] === c[1]) || (a[0] === b[0] && b[0] === c[0])) {
+          cleaned.splice(i, 1);
+          removed = true;
+          break;
+        }
+      }
+    }
+
+    if (cleaned.length < 2) return '';
+    const r = Math.max(0, corner_radius || 0);
+    if (cleaned.length === 2 || r === 0) {
+      let d = ' M ' + cleaned[0][0] + ' ' + cleaned[0][1];
+      for (let i = 1; i < cleaned.length; i++) d += ' L ' + cleaned[i][0] + ' ' + cleaned[i][1];
+      return d;
+    }
+
+    let d = ' M ' + cleaned[0][0] + ' ' + cleaned[0][1];
+    for (let i = 1; i < cleaned.length - 1; i++) {
+      const px = cleaned[i - 1][0], py = cleaned[i - 1][1];
+      const cx = cleaned[i][0],     cy = cleaned[i][1];
+      const nx = cleaned[i + 1][0], ny = cleaned[i + 1][1];
+      const len_in = Math.hypot(cx - px, cy - py);
+      const len_out = Math.hypot(nx - cx, ny - cy);
+      const eff_r = Math.min(r, len_in / 2, len_out / 2);
+      const ax = cx - (cx - px) / (len_in || 1) * eff_r;
+      const ay = cy - (cy - py) / (len_in || 1) * eff_r;
+      const bx = cx + (nx - cx) / (len_out || 1) * eff_r;
+      const by = cy + (ny - cy) / (len_out || 1) * eff_r;
+      d += ' L ' + ax + ' ' + ay + ' Q ' + cx + ' ' + cy + ' ' + bx + ' ' + by;
+    }
+    const last = cleaned[cleaned.length - 1];
+    d += ' L ' + last[0] + ' ' + last[1];
+    return d;
+  }
+
   drawConnection(ele) {
     var connection = document.createElementNS('http://www.w3.org/2000/svg',"svg");
     this.connection_ele = connection;
@@ -688,7 +767,12 @@ export default class Drawflow {
     var y = eY * ( this.precanvas.clientHeight / (this.precanvas.clientHeight * this.zoom)) - (this.precanvas.getBoundingClientRect().y *  ( this.precanvas.clientHeight / (this.precanvas.clientHeight * this.zoom)) );
 
     var curvature = this.curvature;
-    var lineCurve = this.createCurvature(line_x, line_y, x, y, curvature, 'openclose');
+    var lineCurve;
+    if (this.connection_style === 'orthogonal') {
+      lineCurve = this.createOrthogonalPath(line_x, line_y, x, y, this.connection_corner_radius, 'openclose');
+    } else {
+      lineCurve = this.createCurvature(line_x, line_y, x, y, curvature, 'openclose');
+    }
     path.setAttributeNS(null, 'd', lineCurve);
 
   }
@@ -745,11 +829,35 @@ export default class Drawflow {
     const precanvas = this.precanvas;
     const curvature = this.curvature;
     const createCurvature = this.createCurvature;
+    const createOrthogonalPath = this.createOrthogonalPath;
     const reroute_curvature = this.reroute_curvature;
     const reroute_curvature_start_end = this.reroute_curvature_start_end;
     const reroute_fix_curvature = this.reroute_fix_curvature;
     const rerouteWidth = this.reroute_width;
     const zoom = this.zoom;
+    const moduleData = this.drawflow.drawflow[this.module] && this.drawflow.drawflow[this.module].data;
+    const default_style = this.connection_style;
+    const corner_radius = this.connection_corner_radius;
+    const findConn = function(outRawId, outCls, inRawId, inCls) {
+      const node = moduleData && moduleData[outRawId];
+      if (!node || !node.outputs || !node.outputs[outCls]) return null;
+      const conns = node.outputs[outCls].connections || [];
+      for (let i = 0; i < conns.length; i++) {
+        if (String(conns[i].node) === String(inRawId) && conns[i].output === inCls) return conns[i];
+      }
+      return null;
+    };
+    const resolveStyle = function(conn) {
+      const s = conn && conn.style;
+      if (s === 'bezier' || s === 'orthogonal') return s;
+      return default_style === 'orthogonal' ? 'orthogonal' : 'bezier';
+    };
+    const segPath = function(sx, sy, ex, ey, curv, segType, conn) {
+      if (resolveStyle(conn) === 'orthogonal') {
+        return createOrthogonalPath(sx, sy, ex, ey, corner_radius, segType);
+      }
+      return createCurvature(sx, sy, ex, ey, curv, segType);
+    };
     let precanvasWitdhZoom = precanvas.clientWidth / (precanvas.clientWidth * zoom);
     precanvasWitdhZoom = precanvasWitdhZoom || 0;
     let precanvasHeightZoom = precanvas.clientHeight / (precanvas.clientHeight * zoom);
@@ -778,10 +886,12 @@ export default class Drawflow {
         var x = eX;
         var y = eY;
 
-        const lineCurve = createCurvature(line_x, line_y, x, y, curvature, 'openclose');
+        const conn = findConn(id.slice(5), elemsOut[item].classList[3], id_search.slice(5), elemsOut[item].classList[4]);
+        const lineCurve = segPath(line_x, line_y, x, y, curvature, 'openclose', conn);
         elemsOut[item].children[0].setAttributeNS(null, 'd', lineCurve );
       } else {
         const points = elemsOut[item].querySelectorAll('.point');
+        const connOut = findConn(id.slice(5), elemsOut[item].classList[3], elemsOut[item].classList[1].replace('node_in_node-', ''), elemsOut[item].classList[4]);
         let linecurve = '';
         const reoute_fix = [];
         points.forEach((item, i) => {
@@ -799,7 +909,7 @@ export default class Drawflow {
             var x = eX;
             var y = eY;
 
-            var lineCurveSearch = createCurvature(line_x, line_y, x, y, reroute_curvature_start_end, 'open');
+            var lineCurveSearch = segPath(line_x, line_y, x, y, reroute_curvature_start_end, 'open', connOut);
             linecurve += lineCurveSearch;
             reoute_fix.push(lineCurveSearch);
 
@@ -818,7 +928,7 @@ export default class Drawflow {
             var x = eX;
             var y = eY;
 
-            var lineCurveSearch = createCurvature(line_x, line_y, x, y, reroute_curvature_start_end, 'close');
+            var lineCurveSearch = segPath(line_x, line_y, x, y, reroute_curvature_start_end, 'close', connOut);
             linecurve += lineCurveSearch;
             reoute_fix.push(lineCurveSearch);
 
@@ -837,7 +947,7 @@ export default class Drawflow {
             var x = eX;
             var y = eY;
 
-            var lineCurveSearch = createCurvature(line_x, line_y, x, y, reroute_curvature_start_end, 'open');
+            var lineCurveSearch = segPath(line_x, line_y, x, y, reroute_curvature_start_end, 'open', connOut);
             linecurve += lineCurveSearch;
             reoute_fix.push(lineCurveSearch);
 
@@ -852,7 +962,7 @@ export default class Drawflow {
             var x = eX;
             var y = eY;
 
-            var lineCurveSearch = createCurvature(line_x, line_y, x, y, reroute_curvature, 'other');
+            var lineCurveSearch = segPath(line_x, line_y, x, y, reroute_curvature, 'other', connOut);
             linecurve += lineCurveSearch;
             reoute_fix.push(lineCurveSearch);
 
@@ -872,7 +982,7 @@ export default class Drawflow {
             var x = eX;
             var y = eY;
 
-            var lineCurveSearch = createCurvature(line_x, line_y, x, y, reroute_curvature_start_end, 'close');
+            var lineCurveSearch = segPath(line_x, line_y, x, y, reroute_curvature_start_end, 'close', connOut);
             linecurve += lineCurveSearch;
             reoute_fix.push(lineCurveSearch);
 
@@ -887,7 +997,7 @@ export default class Drawflow {
             var x = eX;
             var y = eY;
 
-            var lineCurveSearch = createCurvature(line_x, line_y, x, y, reroute_curvature, 'other');
+            var lineCurveSearch = segPath(line_x, line_y, x, y, reroute_curvature, 'other', connOut);
             linecurve += lineCurveSearch;
             reoute_fix.push(lineCurveSearch);
           }
@@ -922,11 +1032,13 @@ export default class Drawflow {
         var x = elemtsearchId_in.offsetWidth/2 + (elemtsearchId_in.getBoundingClientRect().x - precanvas.getBoundingClientRect().x ) * precanvasWitdhZoom;
         var y = elemtsearchId_in.offsetHeight/2 + (elemtsearchId_in.getBoundingClientRect().y - precanvas.getBoundingClientRect().y ) * precanvasHeightZoom;
 
-        const lineCurve = createCurvature(line_x, line_y, x, y, curvature, 'openclose');
+        const conn = findConn(id_search.slice(5), elems[item].classList[3], id.slice(5), elems[item].classList[4]);
+        const lineCurve = segPath(line_x, line_y, x, y, curvature, 'openclose', conn);
         elems[item].children[0].setAttributeNS(null, 'd', lineCurve );
 
       } else {
         const points = elems[item].querySelectorAll('.point');
+        const connIn = findConn(elems[item].classList[2].replace('node_out_node-', ''), elems[item].classList[3], id.slice(5), elems[item].classList[4]);
         let linecurve = '';
         const reoute_fix = [];
         points.forEach((item, i) => {
@@ -945,7 +1057,7 @@ export default class Drawflow {
             var x = eX;
             var y = eY;
 
-            var lineCurveSearch = createCurvature(line_x, line_y, x, y, reroute_curvature_start_end, 'close');
+            var lineCurveSearch = segPath(line_x, line_y, x, y, reroute_curvature_start_end, 'close', connIn);
             linecurve += lineCurveSearch;
             reoute_fix.push(lineCurveSearch);
 
@@ -963,7 +1075,7 @@ export default class Drawflow {
             var x = eX;
             var y = eY;
 
-            var lineCurveSearch = createCurvature(line_x, line_y, x, y, reroute_curvature_start_end, 'open');
+            var lineCurveSearch = segPath(line_x, line_y, x, y, reroute_curvature_start_end, 'open', connIn);
             linecurve += lineCurveSearch;
             reoute_fix.push(lineCurveSearch);
 
@@ -983,7 +1095,7 @@ export default class Drawflow {
             var x = eX;
             var y = eY;
 
-            var lineCurveSearch = createCurvature(line_x, line_y, x, y, reroute_curvature_start_end, 'open');
+            var lineCurveSearch = segPath(line_x, line_y, x, y, reroute_curvature_start_end, 'open', connIn);
             linecurve += lineCurveSearch;
             reoute_fix.push(lineCurveSearch);
 
@@ -998,7 +1110,7 @@ export default class Drawflow {
             var x = eX;
             var y = eY;
 
-            var lineCurveSearch = createCurvature(line_x, line_y, x, y, reroute_curvature, 'other');
+            var lineCurveSearch = segPath(line_x, line_y, x, y, reroute_curvature, 'other', connIn);
             linecurve += lineCurveSearch;
             reoute_fix.push(lineCurveSearch);
 
@@ -1019,7 +1131,7 @@ export default class Drawflow {
             var x = eX;
             var y = eY;
 
-            var lineCurveSearch = createCurvature(line_x, line_y, x, y, reroute_curvature_start_end, 'close');
+            var lineCurveSearch = segPath(line_x, line_y, x, y, reroute_curvature_start_end, 'close', connIn);
             linecurve += lineCurveSearch;
             reoute_fix.push(lineCurveSearch);
 
@@ -1035,7 +1147,7 @@ export default class Drawflow {
             var x = eX;
             var y = eY;
 
-            var lineCurveSearch = createCurvature(line_x, line_y, x, y, reroute_curvature, 'other');
+            var lineCurveSearch = segPath(line_x, line_y, x, y, reroute_curvature, 'other', connIn);
             linecurve += lineCurveSearch;
             reoute_fix.push(lineCurveSearch);
           }
@@ -1782,6 +1894,37 @@ export default class Drawflow {
     } else {
       return false;
     }
+  }
+
+  updateConnectionStyle(id_output, id_input, output_class, input_class, style) {
+    var nodeOneModule = this.getModuleFromNodeId(id_output);
+    var nodeTwoModule = this.getModuleFromNodeId(id_input);
+    if(nodeOneModule !== nodeTwoModule) return false;
+
+    var conns = this.drawflow.drawflow[nodeOneModule].data[id_output].outputs[output_class].connections;
+    var idx = conns.findIndex(function(item){ return item.node == id_input && item.output === input_class; });
+    if(idx === -1) return false;
+
+    if(style === 'bezier' || style === 'orthogonal') {
+      conns[idx].style = style;
+    } else {
+      delete conns[idx].style;
+    }
+
+    if(this.module === nodeOneModule) {
+      this.updateConnectionNodes('node-' + id_output);
+    }
+    this.dispatch('connectionStyleChanged', { output_id: id_output, input_id: id_input, output_class: output_class, input_class: input_class, style: conns[idx].style || null });
+    return true;
+  }
+
+  refreshConnections() {
+    var data = this.drawflow.drawflow[this.module] && this.drawflow.drawflow[this.module].data;
+    if(!data) return;
+    var self = this;
+    Object.keys(data).forEach(function(nodeId) {
+      self.updateConnectionNodes('node-' + nodeId);
+    });
   }
 
   removeConnectionNodeId(id) {
